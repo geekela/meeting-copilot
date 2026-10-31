@@ -95,3 +95,31 @@ export function clearRecording(): Promise<void> {
     chunks.clear();
   });
 }
+
+// --- One recording at a time, across tabs ------------------------------------
+// The tab that records holds a Web Lock for as long as it records. The browser
+// releases it when that tab stops, closes, reloads or crashes.
+
+const LOCK = "meeting-copilot-recording";
+
+/** Takes the recording lock if no other tab holds it. Returns its release function, or null. */
+export function holdRecordingLock(): Promise<(() => void) | null> {
+  if (!navigator.locks) return Promise.resolve(() => undefined);
+  return new Promise((resolve) => {
+    void navigator.locks.request(LOCK, { ifAvailable: true }, (lock) => {
+      if (!lock) {
+        resolve(null);
+        return;
+      }
+      // Held until the returned function is called.
+      return new Promise<void>((release) => resolve(() => release()));
+    });
+  });
+}
+
+/** True while another tab is recording (so its stored recording is live, not left over). */
+export async function recordingInOtherTab(): Promise<boolean> {
+  if (!navigator.locks) return false;
+  const { held = [] } = await navigator.locks.query();
+  return held.some((l) => l.name === LOCK);
+}

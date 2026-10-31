@@ -28,7 +28,7 @@ automatically, not committed; move it with `TASKS_DB`). API:
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/api/analyze` | Extract candidate tasks from notes |
-| `POST` | `/api/transcribe` | Transcribe a recording (multipart field `audio`) into speaker-labelled text |
+| `POST` | `/api/transcribe` | Transcribe a recording (raw audio body, e.g. `Content-Type: audio/webm`) into speaker-labelled text |
 | `GET` | `/api/tasks` | List saved tasks |
 | `POST` | `/api/tasks` | Save approved tasks (`{"tasks": [...]}`, all-or-nothing) |
 | `PATCH` | `/api/tasks/{id}` | Update `owner`, `deadline` and/or `completed` |
@@ -53,13 +53,15 @@ by hand, then analyze as usual.
 - Needs `MISTRAL_API_KEY` in `backend/.env`. Set `TRANSCRIBER=mock` for an
   offline stand-in that returns a fixed transcript. `MISTRAL_TRANSCRIBE_MODEL`
   overrides the model.
-- Recordings stop automatically at **60 minutes** (Mistral's limit per request),
-  with a warning from 50.
+- Recordings stop automatically at **59 minutes**, just under Mistral's 60-minute
+  limit per request, with a warning from 50.
 - The audio is saved in the browser every 10 seconds while recording. If the
   tab crashes or is reloaded, the app offers to **Transcribe** or **Discard**
   the saved recording when you reopen it. After a failed upload, use **Retry**.
+- Only one tab can record at a time.
 - The recording is deleted once it is transcribed. Only the text is kept, in
-  the notes box. The backend never writes audio to disk or logs it.
+  the notes box. The backend keeps the audio in memory only: it never writes it
+  to disk or logs it.
 
 ### Frontend
 ```bash

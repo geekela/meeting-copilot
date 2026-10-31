@@ -1,18 +1,15 @@
 import { useEffect, useState } from "react";
 import { transcribeAudio } from "./api";
-import { clearRecording, loadRecording, type StoredRecording } from "./recordingStore";
-import { useRecorder, WARN_AT_MS } from "./useRecorder";
+import { clearRecording, loadRecording, recordingInOtherTab, type StoredRecording } from "./recordingStore";
+import { MAX_RECORDING_MS, useRecorder, WARN_AT_MS, type FinishedRecording } from "./useRecorder";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const clock = (ms: number) => `${pad(Math.floor(ms / 60_000))}:${pad(Math.floor((ms % 60_000) / 1000))}`;
 const timeOfDay = (at: number) => `${pad(new Date(at).getHours())}:${pad(new Date(at).getMinutes())}`;
 const minutes = (rec: StoredRecording) => Math.max(1, Math.round((rec.lastChunkAt - rec.startedAt) / 60_000));
 
-function filenameFor(mimeType: string): string {
-  if (mimeType.includes("ogg")) return "recording.ogg";
-  if (mimeType.includes("mp4")) return "recording.m4a";
-  return "recording.webm";
-}
+const SAVE_FAILED =
+  "The browser stopped saving the recording, so it ended early. The part that was saved has been transcribed.";
 
 type Props = {
   onTranscript: (text: string) => void;
@@ -27,14 +24,27 @@ type Pending = { rec: StoredRecording; source: "recovered" | "failed" };
 export default function RecordControls({ onTranscript, onError, disabled }: Props) {
   const [pending, setPending] = useState<Pending | null>(null);
   const [transcribing, setTranscribing] = useState(false);
+  // Record stays off until we know whether a recording is waiting to be transcribed.
+  const [checked, setChecked] = useState(false);
+  const [otherTab, setOtherTab] = useState(false);
 
-  async function send(rec: StoredRecording, source: Pending["source"]) {
+  /** A recording another tab is still making must not be transcribed or discarded here. */
+  async function liveElsewhere(): Promise<boolean> {
+    if (!(await recordingInOtherTab().catch(() => false))) return false;
+    setOtherTab(true);
+    setPending(null);
+    return true;
+  }
+
+  async function send(rec: StoredRecording, source: Pending["source"], warning?: string) {
+    if (source === "recovered" && (await liveElsewhere())) return;
     setTranscribing(true);
     onError(null);
     try {
-      const result = await transcribeAudio(rec.blob, filenameFor(rec.mimeType));
+      const result = await transcribeAudio(rec.blob);
       onTranscript(result.transcript);
       setPending(null);
+      if (warning) onError(warning);
       await clearRecording().catch(() => undefined);
     } catch (e) {
       // Keep the recording (it is still stored) so nothing is lost.
@@ -45,25 +55,40 @@ export default function RecordControls({ onTranscript, onError, disabled }: Prop
     }
   }
 
-  const recorder = useRecorder((rec) => send(rec, "failed"));
+  function finished({ recording, saveFailed }: FinishedRecording) {
+    if (!recording) {
+      onError("Nothing was saved from this recording.");
+      return;
+    }
+    void send(recording, "failed", saveFailed ? SAVE_FAILED : undefined);
+  }
+
+  const recorder = useRecorder(finished);
   const recording = recorder.status === "recording";
 
   useEffect(() => {
-    loadRecording()
-      .then((rec) => rec && setPending((p) => p ?? { rec, source: "recovered" }))
-      .catch(() => undefined);
+    (async () => {
+      if (await recordingInOtherTab().catch(() => false)) {
+        setOtherTab(true);
+        return;
+      }
+      const rec = await loadRecording().catch(() => null);
+      if (rec) setPending((p) => p ?? { rec, source: "recovered" });
+    })().finally(() => setChecked(true));
   }, []);
 
   async function startRecording() {
     onError(null);
     try {
       await recorder.start();
+      setOtherTab(false); // this tab holds the recording lock now
     } catch (e) {
       onError(e instanceof Error ? e.message : "Could not start recording.");
     }
   }
 
   async function discard() {
+    if (pending?.source === "recovered" && (await liveElsewhere())) return;
     await clearRecording().catch(() => undefined);
     setPending(null);
     onError(null);
@@ -88,7 +113,7 @@ export default function RecordControls({ onTranscript, onError, disabled }: Prop
             className="secondary"
             onClick={startRecording}
             // One stored recording at a time: transcribe or discard the saved one first.
-            disabled={disabled || transcribing || pending !== null}
+            disabled={disabled || !checked || recorder.status === "finishing" || transcribing || pending !== null}
           >
             <span className="rec-dot idle" aria-hidden="true" />
             Record
@@ -104,7 +129,11 @@ export default function RecordControls({ onTranscript, onError, disabled }: Prop
       </div>
 
       {recording && recorder.elapsedMs >= WARN_AT_MS && (
-        <p className="rec-warning">Recording stops automatically at 60 minutes.</p>
+        <p className="rec-warning">{`Recording stops automatically at ${MAX_RECORDING_MS / 60_000} minutes.`}</p>
+      )}
+
+      {otherTab && !recording && (
+        <p className="rec-notice" role="status">A recording is in progress in another tab.</p>
       )}
 
       {pending?.source === "recovered" && !transcribing && (

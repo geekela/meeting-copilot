@@ -82,28 +82,58 @@ def test_analyzer_failure_returns_502():
 from app import main as main_module  # noqa: E402
 from app.transcriber import MOCK_TRANSCRIPT, TranscriberError, get_transcriber  # noqa: E402
 
-WEBM = ("rec.webm", b"\x1aE\xdf\xa3fake", "audio/webm")
+WEBM = b"\x1aE\xdf\xa3fake"
+AUDIO_HEADERS = {"Content-Type": "audio/webm"}
+
+
+def post_audio(body: bytes, content_type: str = "audio/webm"):
+    """The browser sends the recording as the raw request body (never multipart)."""
+    return client.post("/api/transcribe", content=body, headers={"Content-Type": content_type})
 
 
 def test_transcribe_endpoint_contract():
-    res = client.post("/api/transcribe", files={"audio": WEBM})
+    res = post_audio(WEBM)
     assert res.status_code == 200
     assert res.json() == {"transcript": MOCK_TRANSCRIPT, "transcriber": "mock"}
 
 
+def test_transcribe_accepts_codec_parameters():
+    assert post_audio(WEBM, "audio/webm;codecs=opus").status_code == 200
+
+
+def test_transcribe_passes_type_and_filename_to_transcriber():
+    seen = {}
+
+    class Spy:
+        name = "spy"
+
+        def transcribe(self, audio, filename, content_type):
+            seen.update(audio=audio, filename=filename, content_type=content_type)
+            return "Speaker 1: Hi."
+
+    app.dependency_overrides[get_transcriber] = lambda: Spy()
+    try:
+        assert post_audio(b"OggS-data", "audio/ogg;codecs=opus").status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+    assert seen == {"audio": b"OggS-data", "filename": "recording.ogg", "content_type": "audio/ogg"}
+
+
 def test_transcribe_rejects_empty_upload():
-    res = client.post("/api/transcribe", files={"audio": ("rec.webm", b"", "audio/webm")})
+    res = post_audio(b"")
     assert res.status_code == 422
     assert res.json() == {"detail": "The recording is empty."}
 
 
-def test_transcribe_rejects_missing_file():
-    assert client.post("/api/transcribe").status_code == 422
+def test_transcribe_rejects_non_audio_upload():
+    res = post_audio(b'{"a": 1}', "application/json")
+    assert res.status_code == 415
+    assert res.json() == {"detail": "Send the recording as audio."}
 
 
 def test_transcribe_rejects_oversized_upload(monkeypatch):
     monkeypatch.setattr(main_module, "MAX_AUDIO_BYTES", 10)
-    res = client.post("/api/transcribe", files={"audio": ("rec.webm", b"x" * 11, "audio/webm")})
+    res = post_audio(b"x" * 11)
     assert res.status_code == 413
     assert res.json() == {"detail": "The recording is too large to transcribe."}
 
@@ -117,7 +147,7 @@ def test_transcriber_error_passes_through():
 
     app.dependency_overrides[get_transcriber] = lambda: RateLimited()
     try:
-        res = client.post("/api/transcribe", files={"audio": WEBM})
+        res = post_audio(WEBM)
         assert (res.status_code, res.json()) == (429, {"detail": "x"})
     finally:
         app.dependency_overrides.clear()
@@ -132,7 +162,7 @@ def test_unexpected_transcriber_failure_is_502():
 
     app.dependency_overrides[get_transcriber] = lambda: Broken()
     try:
-        res = client.post("/api/transcribe", files={"audio": WEBM})
+        res = post_audio(WEBM)
         assert (res.status_code, res.json()) == (502, {"detail": "Transcription failed unexpectedly."})
     finally:
         app.dependency_overrides.clear()

@@ -37,7 +37,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(`${API_URL}${path}`, {
       ...init,
-      // JSON bodies are strings; FormData sets its own multipart Content-Type.
+      // JSON bodies are strings; audio uploads set their own Content-Type.
       headers: typeof init?.body === "string" ? { "Content-Type": "application/json", ...init.headers } : init?.headers,
     });
   } catch {
@@ -55,10 +55,13 @@ export function analyzeNotes(notes: string): Promise<AnalyzeResponse> {
   return request("/api/analyze", { method: "POST", body: JSON.stringify({ notes }) });
 }
 
-export function transcribeAudio(audio: Blob, filename: string): Promise<TranscribeResponse> {
-  const form = new FormData();
-  form.append("audio", audio, filename);
-  return request("/api/transcribe", { method: "POST", body: form });
+/** Sends the recording as the raw request body (kept in memory on the server, never multipart). */
+export function transcribeAudio(audio: Blob): Promise<TranscribeResponse> {
+  return request("/api/transcribe", {
+    method: "POST",
+    body: audio,
+    headers: { "Content-Type": audio.type || "audio/webm" },
+  });
 }
 
 export function listTasks(): Promise<SavedTask[]> {
