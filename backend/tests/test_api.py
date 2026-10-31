@@ -136,3 +136,9 @@ def test_unexpected_transcriber_failure_is_502():
         assert (res.status_code, res.json()) == (502, {"detail": "Transcription failed unexpectedly."})
     finally:
         app.dependency_overrides.clear()
+
+
+def test_notes_limit_is_60000():
+    # Long enough for a ~1 hour transcript.
+    assert client.post("/api/analyze", json={"notes": "a" * 60_000}).status_code == 200
+    assert client.post("/api/analyze", json={"notes": "a" * 60_001}).status_code == 422

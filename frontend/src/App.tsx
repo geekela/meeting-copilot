@@ -19,7 +19,7 @@ Sam mentioned a nice vegan restaurant for the team dinner.
 We discussed the timeline and everyone agreed it looks fine.`;
 
 const NO_DEADLINE = "No deadline";
-const MAX_NOTES = 20_000; // backend limit (AnalyzeRequest.notes)
+const MAX_NOTES = 60_000; // backend limit (AnalyzeRequest.notes)
 // Deadlines are free text. An empty field means (and is stored as) "No deadline".
 const deadlineToInput = (deadline: string) => (deadline === NO_DEADLINE ? "" : deadline);
 const inputToDeadline = (value: string) => value.trim() || NO_DEADLINE;

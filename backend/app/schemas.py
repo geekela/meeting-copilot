@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 
 class AnalyzeRequest(BaseModel):
-    notes: str = Field(..., min_length=1, max_length=20_000)
+    notes: str = Field(..., min_length=1, max_length=60_000)
 
 
 class TranscribeResponse(BaseModel):

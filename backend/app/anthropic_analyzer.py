@@ -51,8 +51,8 @@ class AnthropicAnalyzer:
             # Organization-scoped keys must name the workspace on every request.
             workspace_id = os.getenv("ANTHROPIC_WORKSPACE_ID")
             headers = {"anthropic-workspace-id": workspace_id} if workspace_id else None
-            # Fail fast for an interactive UI: 30s per attempt, one retry on 429/5xx/network.
-            client = anthropic.Anthropic(timeout=30.0, max_retries=1, default_headers=headers)
+            # Interactive UI, but transcripts can be long: 90s per attempt, one retry on 429/5xx/network.
+            client = anthropic.Anthropic(timeout=90.0, max_retries=1, default_headers=headers)
         self.client = client
 
     def analyze(self, notes: str) -> list[ActionItem]:
