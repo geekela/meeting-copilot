@@ -44,3 +44,9 @@ npm run test:e2e:live             # real Claude via backend/.env (paid API calls
 ```
 
 Requires the backend virtualenv at `backend/.venv` (see above).
+
+## CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on pull requests:
+backend `pytest`, frontend lint + build, and the Playwright e2e suite. CI always uses the
+mock analyzer, so it needs no secrets and makes no paid API calls.
