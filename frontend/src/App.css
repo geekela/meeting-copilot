@@ -15,3 +15,20 @@ th { background: #f7f7f7; font-size: 0.9rem; }
 .owner-input:hover, .owner-input:focus { border-color: #ccc; background: #fff; outline: none; }
 tr.completed .task { text-decoration: line-through; color: #999; }
 .badge { margin-left: 10px; padding: 2px 8px; border-radius: 999px; background: #f2f2f2; color: #555; font-size: 0.75rem; font-weight: 500; vertical-align: middle; }
+
+/* Review flow */
+.results-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.results-header h2 { margin: 0; }
+.summary { margin: 6px 0 14px; color: #666; font-size: 0.9rem; }
+button.small { padding: 5px 10px; font-size: 0.8rem; border-radius: 6px; }
+button.approve { background: #16794a; }
+button.ghost { background: transparent; color: #9b1c1c; }
+button.ghost:hover { background: #fde8e8; }
+button.link { background: none; color: #fa500f; padding: 0 0 0 8px; text-decoration: underline; }
+.review { white-space: nowrap; }
+.approved-label { display: inline-block; min-width: 72px; color: #16794a; font-size: 0.85rem; font-weight: 600; }
+tr.pending .task, tr.pending td:nth-child(4) { color: #555; }
+tr.pending { background: #fffaf5; }
+.tag { margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: #eef2ff; color: #3b4cca; font-size: 0.7rem; font-weight: 600; vertical-align: middle; }
+.undo { display: flex; align-items: center; padding: 8px 12px; margin-bottom: 12px; border-radius: 8px; background: #f2f2f2; font-size: 0.9rem; }
+td:nth-child(4) { white-space: nowrap; }

@@ -49,19 +49,76 @@ test("extracts action items end to end", async ({ page }) => {
   await expect(bob.locator("td").nth(3)).toContainText(/next week/i);
 });
 
-test("items can be completed and reassigned", async ({ page }) => {
+test("items can be completed and reassigned once approved", async ({ page }) => {
   await analyze(page, NOTES);
   await expect(rows(page).first()).toBeVisible();
   const total = await rows(page).count();
-  const heading = page.getByRole("heading", { level: 2 });
+  const first = rows(page).first();
 
-  await rows(page).first().getByRole("checkbox").check();
-  await expect(heading).toContainText(`(1/${total} completed)`);
-  await expect(rows(page).first()).toHaveClass("completed");
+  // Pending tasks cannot be ticked off.
+  await expect(first.getByRole("checkbox")).toBeDisabled();
+  await first.getByRole("button", { name: /^Approve/ }).click();
+  await first.getByRole("checkbox").check();
+  await expect(page.getByTestId("summary")).toHaveText(`1 approved · ${total - 1} to review · 1/1 done`);
+  await expect(first).toHaveClass(/completed/);
 
   const owner = rows(page).last().locator(".owner-input");
   await owner.fill("Carla");
   await expect(owner).toHaveValue("Carla");
+});
+
+const CASUAL_NOTES = `ari takes care of booking venue
+sam mentioned a nice vegan food restaurant
+jules sends out invitations
+
+mark says he would like to get drinks`;
+
+test("casual notes produce four tasks to review, including suggestions", async ({ page }) => {
+  await analyze(page, CASUAL_NOTES);
+  await expect(rows(page)).toHaveCount(4);
+  await expect(page.locator('tr[data-status="pending"]')).toHaveCount(4);
+  for (const name of ["Ari", "Sam", "Jules", "Mark"]) {
+    await expect(page.locator(`input[value="${name}"]`)).toHaveCount(1);
+  }
+  const suggestions = rows(page).filter({ has: page.locator(".tag", { hasText: "suggestion" }) });
+  await expect(suggestions).toHaveCount(2);
+  await expect(page.getByTestId("summary")).toHaveText("0 approved · 4 to review · 0/0 done");
+});
+
+test("tasks can be approved, removed and restored", async ({ page }) => {
+  await analyze(page, CASUAL_NOTES);
+  await expect(rows(page)).toHaveCount(4);
+
+  const ari = rows(page).filter({ has: page.locator('input[value="Ari"]') });
+  await ari.getByRole("button", { name: /^Approve/ }).click();
+  await expect(ari).toHaveAttribute("data-status", "approved");
+  await expect(ari.getByText("✓ Approved")).toBeVisible();
+
+  const mark = rows(page).filter({ has: page.locator('input[value="Mark"]') });
+  await mark.getByRole("button", { name: /^Remove/ }).click();
+  await expect(rows(page)).toHaveCount(3);
+  await expect(page.locator('input[value="Mark"]')).toHaveCount(0);
+  await expect(page.getByTestId("summary")).toHaveText("1 approved · 2 to review · 0/1 done");
+
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(rows(page)).toHaveCount(4);
+  await expect(rows(page).last().locator(".owner-input")).toHaveValue("Mark"); // back in its original place
+  await expect(page.getByRole("button", { name: "Undo" })).toHaveCount(0);
+});
+
+test("Approve all approves every pending task", async ({ page }) => {
+  await analyze(page, CASUAL_NOTES);
+  await page.getByRole("button", { name: "Approve all (4)" }).click();
+  await expect(page.locator('tr[data-status="approved"]')).toHaveCount(4);
+  await expect(page.getByRole("button", { name: /Approve all/ })).toHaveCount(0);
+  await expect(page.getByTestId("summary")).toHaveText("4 approved · 0 to review · 0/4 done");
+});
+
+test("removing every task shows an empty message", async ({ page }) => {
+  await analyze(page, "Alice will call the client.");
+  await expect(rows(page)).toHaveCount(1);
+  await rows(page).first().getByRole("button", { name: /^Remove/ }).click();
+  await expect(page.getByText("All tasks removed.")).toBeVisible();
 });
 
 test("previous results are cleared while a new analysis runs", async ({ page }) => {

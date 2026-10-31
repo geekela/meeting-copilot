@@ -3,6 +3,7 @@ export interface ActionItem {
   task: string;
   owner: string;
   deadline: string;
+  kind: "commitment" | "suggestion";
 }
 
 export interface AnalyzeResponse {

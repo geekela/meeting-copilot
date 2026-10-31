@@ -22,12 +22,34 @@ def test_extracts_owner_task_deadline():
     ]
 
 
+CASUAL_NOTES = """ari takes care of booking venue
+sam mentioned a nice vegan food restaurant
+jules sends out invitations
+
+mark says he would like to get drinks"""
+
+
+def test_casual_notes_yield_commitments_and_suggestions():
+    items = MockAnalyzer().analyze(CASUAL_NOTES)
+    assert items == [
+        ActionItem(task="Take care of booking venue", owner="Ari", kind="commitment"),
+        ActionItem(task="Consider a nice vegan food restaurant", owner="Sam", kind="suggestion"),
+        ActionItem(task="Send out invitations", owner="Jules", kind="commitment"),
+        ActionItem(task="Get drinks", owner="Mark", kind="suggestion"),
+    ]
+
+
+def test_pronouns_and_discussion_are_not_tasks():
+    notes = "we would like to finish early. Everyone agreed it looks fine. They mentioned the weather."
+    assert MockAnalyzer().analyze(notes) == []
+
+
 def test_analyze_endpoint_contract():
     res = client.post("/api/analyze", json={"notes": NOTES})
     assert res.status_code == 200
     body = res.json()
     assert len(body["action_items"]) == 3
-    assert set(body["action_items"][0]) == {"task", "owner", "deadline"}
+    assert set(body["action_items"][0]) == {"task", "owner", "deadline", "kind"}
 
 
 def test_no_action_items_returns_empty_list():

@@ -1,4 +1,6 @@
 """API contract. The frontend depends only on these shapes."""
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -10,6 +12,9 @@ class ActionItem(BaseModel):
     task: str
     owner: str = "Unassigned"
     deadline: str = "No deadline"
+    # "commitment": someone took on or was assigned the task.
+    # "suggestion": an idea, recommendation or wish that might become a task; the user decides.
+    kind: Literal["commitment", "suggestion"] = "commitment"
 
 
 class ExtractedActionItems(BaseModel):

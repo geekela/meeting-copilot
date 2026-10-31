@@ -26,9 +26,28 @@ class AnalyzerError(Exception):
         self.message = message
 
 
-# "Alice will ...", "Bob to ...", "Carol needs to ...", "Dan should ..."
-OWNER_PATTERN = re.compile(
-    r"^(?P<owner>[A-Z][a-z]+)\s+(?:will|to|needs to|should|must)\s+(?P<task>.+)$"
+NAME = r"(?P<owner>(?!(?:we|i|you|they|he|she|it|everyone|someone|nobody)\b)[A-Za-z][a-z]+)"
+# Commitments: "Alice will ...", "bob to ...", "Carol needs to ...", "ari takes care of ..."
+OWNER_PATTERN = re.compile(rf"^{NAME}\s+(?:will|to|needs to|should|must)\s+(?P<task>.+)$", re.I)
+# Third-person verbs ("jules sends out invitations") -> imperative ("Send out invitations").
+THIRD_PERSON = {
+    "takes care of": "take care of", "handles": "handle", "sends": "send", "books": "book",
+    "prepares": "prepare", "organizes": "organize", "organises": "organise", "writes": "write",
+    "drafts": "draft", "updates": "update", "schedules": "schedule", "calls": "call",
+    "contacts": "contact", "emails": "email", "reviews": "review", "follows up": "follow up",
+    "is responsible for": "handle", "is in charge of": "handle",
+}
+VERB_PATTERN = re.compile(
+    rf"^{NAME}\s+(?P<verb>{'|'.join(sorted(map(re.escape, THIRD_PERSON), key=len, reverse=True))})\s+(?P<task>.+)$",
+    re.I,
+)
+# Suggestions: "sam mentioned a nice restaurant", "Mark says he would like to get drinks"
+SUGGESTION_PATTERN = re.compile(
+    rf"^{NAME}\s+(?:mentioned|suggested|proposed|recommended)\s+(?P<task>.+)$", re.I
+)
+WISH_PATTERN = re.compile(
+    rf"^{NAME}\s+(?:says?\s+(?:he|she|they)\s+)?(?:would like to|wants to|wishes to|'d like to)\s+(?P<task>.+)$",
+    re.I,
 )
 # "Action: ...", "TODO: ...", "AI: ..." (no explicit owner)
 PREFIX_PATTERN = re.compile(r"^(?:action(?: item)?|todo|ai)\s*[:\-]\s*(?P<task>.+)$", re.I)
@@ -56,13 +75,20 @@ class MockAnalyzer:
             if not line:
                 continue
 
-            owner = "Unassigned"
+            owner, kind = "Unassigned", "commitment"
             if m := OWNER_PATTERN.match(line):
                 owner, task = m["owner"], m["task"]
+            elif m := VERB_PATTERN.match(line):
+                owner, task = m["owner"], f"{THIRD_PERSON[m['verb'].lower()]} {m['task']}"
+            elif m := SUGGESTION_PATTERN.match(line):
+                owner, task, kind = m["owner"], f"Consider {m['task']}", "suggestion"
+            elif m := WISH_PATTERN.match(line):
+                owner, task, kind = m["owner"], m["task"], "suggestion"
             elif m := PREFIX_PATTERN.match(line):
                 task = m["task"]
             else:
                 continue  # not an action item
+            owner = owner[:1].upper() + owner[1:]
 
             deadline = "No deadline"
             if d := DEADLINE_PATTERN.search(task):
@@ -70,7 +96,7 @@ class MockAnalyzer:
                 task = task[: d.start()] + task[d.end():]
 
             task = task.strip(" ,")
-            items.append(ActionItem(task=task[:1].upper() + task[1:], owner=owner, deadline=deadline))
+            items.append(ActionItem(task=task[:1].upper() + task[1:], owner=owner, deadline=deadline, kind=kind))
         return items
 
 
