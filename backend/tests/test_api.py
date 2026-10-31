@@ -49,7 +49,7 @@ def test_analyze_endpoint_contract():
     assert res.status_code == 200
     body = res.json()
     assert len(body["action_items"]) == 3
-    assert set(body["action_items"][0]) == {"task", "owner", "deadline", "kind"}
+    assert set(body["action_items"][0]) == {"task", "owner", "deadline", "kind", "duplicate_of"}
 
 
 def test_no_action_items_returns_empty_list():

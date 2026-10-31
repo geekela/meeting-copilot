@@ -35,3 +35,7 @@ td.deadline { white-space: nowrap; }
 .saved-section .results-header h2 { margin-top: 8px; }
 .cell-input::placeholder { color: #999; }
 .deadline-input { min-width: 110px; }
+tr.duplicate .task, tr.duplicate .cell-input { color: #999; }
+.cell-input:disabled { cursor: default; }
+.cell-input:disabled:hover { border-color: transparent; background: transparent; }
+.saved-label { display: inline-block; padding: 5px 0; min-width: 76px; color: #777; font-size: 0.8rem; font-weight: 600; }

@@ -179,6 +179,60 @@ test("deadlines can be written before approving and edited after saving", async 
   await expect(byOwner(saved(page), "Ari").locator(".deadline-input")).toHaveValue("");
 });
 
+test("analyzing the same notes again does not offer saved tasks twice", async ({ page }) => {
+  await analyze(page, CASUAL_NOTES);
+  await byOwner(review(page), "Ari").getByRole("button", { name: /^Approve/ }).click();
+  await byOwner(review(page), "Jules").getByRole("button", { name: /^Approve/ }).click();
+  await expect(saved(page)).toHaveCount(2);
+
+  await analyze(page, CASUAL_NOTES);
+  await expect(review(page)).toHaveCount(4);
+  const duplicates = review(page).filter({ hasText: "Already saved" });
+  await expect(duplicates).toHaveCount(2);
+  await expect(byOwner(review(page), "Ari")).toHaveClass("duplicate");
+  await expect(byOwner(review(page), "Ari").getByRole("button", { name: /^Approve/ })).toHaveCount(0);
+  await expect(page.getByTestId("review-summary")).toHaveText("2 already saved · 2 new");
+
+  // Approve all only sends the new ones; nothing is saved twice.
+  const post = page.waitForRequest((r) => r.url().endsWith("/api/tasks") && r.method() === "POST");
+  await page.getByRole("button", { name: "Approve all (2)" }).click();
+  expect((await post).postDataJSON().tasks.map((t: { owner: string }) => t.owner)).toEqual(["Sam", "Mark"]);
+  await expect(saved(page)).toHaveCount(4);
+
+  await analyze(page, CASUAL_NOTES);
+  await expect(page.getByTestId("review-summary")).toHaveText("All of these tasks are already saved.");
+  await expect(page.getByRole("button", { name: /Approve all/ })).toHaveCount(0);
+  await page.reload();
+  await expect(saved(page)).toHaveCount(4);
+});
+
+test("a task becomes approvable again after its saved copy is deleted", async ({ page }) => {
+  await analyze(page, "Alice will call the client.");
+  await page.getByRole("button", { name: /Approve all/ }).click();
+  await analyze(page, "Alice will call the client.");
+  await expect(review(page).first()).toContainText("Already saved");
+
+  await saved(page).first().getByRole("button", { name: /^Delete/ }).click();
+  await expect(saved(page)).toHaveCount(0);
+  await expect(review(page).first().getByRole("button", { name: /^Approve/ })).toBeVisible();
+  await review(page).first().getByRole("button", { name: /^Approve/ }).click();
+  await expect(saved(page)).toHaveCount(1);
+});
+
+test("the backend refuses to store a duplicate even if the UI sends one", async ({ page, request }) => {
+  await analyze(page, "Alice will call the client.");
+  await review(page).first().getByRole("button", { name: /^Approve/ }).click();
+  await expect(saved(page)).toHaveCount(1);
+
+  // e.g. a second, stale browser tab approving the same task
+  const res = await request.post(`${API_URL}/api/tasks`, {
+    data: { tasks: [{ task: "call the client", owner: "Alice", deadline: "No deadline", kind: "commitment" }] },
+  });
+  expect(res.status()).toBe(201);
+  await page.reload();
+  await expect(saved(page)).toHaveCount(1);
+});
+
 test("a failed save keeps the task in review and shows the error", async ({ page }) => {
   await analyze(page, "Alice will call the client.");
   await page.route("**/api/tasks", (route) =>

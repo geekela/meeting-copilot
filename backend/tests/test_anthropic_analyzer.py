@@ -137,7 +137,7 @@ def test_anthropic_mode_success_through_endpoint():
     finally:
         app.dependency_overrides.clear()
     assert res.status_code == 200
-    assert res.json() == {"action_items": [items[0].model_dump()], "analyzer": "anthropic"}
+    assert res.json() == {"action_items": [{**items[0].model_dump(), "duplicate_of": None}], "analyzer": "anthropic"}
 
 
 def test_anthropic_mode_without_key_returns_error_not_mock(monkeypatch):

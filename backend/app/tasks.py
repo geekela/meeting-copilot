@@ -5,6 +5,7 @@ Each request opens its own short-lived connection; SQLite serializes writes
 across connections, so no extra locking is needed.
 """
 import os
+import re
 import sqlite3
 from collections.abc import Iterator
 from datetime import datetime, timezone
@@ -28,6 +29,19 @@ CREATE TABLE IF NOT EXISTS tasks (
 COLUMNS = "id, task, owner, deadline, kind, completed, created_at"
 
 
+_FILLER_WORDS = {"a", "an", "the"}
+
+
+def task_key(text: str) -> str:
+    """Identity of a task for duplicate detection.
+
+    Ignores case, punctuation, extra spaces and articles, so "Book the venue." and
+    "book venue" match, while genuinely different tasks do not.
+    """
+    words = re.findall(r"[a-z0-9]+", text.lower())
+    return " ".join(w for w in words if w not in _FILLER_WORDS)
+
+
 def db_path() -> Path:
     return Path(os.getenv("TASKS_DB", str(DEFAULT_DB)))
 
@@ -48,16 +62,34 @@ class TaskStore:
         row = self.conn.execute(f"SELECT {COLUMNS} FROM tasks WHERE id = ?", (task_id,)).fetchone()
         return self._row(row) if row else None
 
+    def keys(self) -> dict[str, int]:
+        """Map of task_key -> id for every saved task (oldest wins)."""
+        keys: dict[str, int] = {}
+        for row in self.conn.execute("SELECT id, task FROM tasks ORDER BY id"):
+            keys.setdefault(task_key(row["task"]), row["id"])
+        return keys
+
     def create_many(self, items: list[TaskCreate]) -> list[Task]:
+        """Save tasks, skipping duplicates.
+
+        Returns one task per input item: the newly created task, or the existing
+        one it duplicates. Saving the same task twice is therefore harmless.
+        """
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         ids = []
         with self.conn:  # one transaction: all saved or none
+            known = self.keys()
             for item in items:
+                key = task_key(item.task)
+                if key in known:
+                    ids.append(known[key])
+                    continue
                 cur = self.conn.execute(
                     "INSERT INTO tasks (task, owner, deadline, kind, completed, created_at)"
                     " VALUES (?, ?, ?, ?, ?, ?)",
                     (item.task, item.owner, item.deadline, item.kind, int(item.completed), now),
                 )
+                known[key] = cur.lastrowid
                 ids.append(cur.lastrowid)
         return [t for t in (self.get(i) for i in ids) if t]
 

@@ -5,7 +5,7 @@ import {
   listTasks,
   saveTasks,
   updateTask,
-  type ActionItem,
+  type AnalyzedItem,
   type SavedTask,
   type TaskChanges,
 } from "./api";
@@ -25,7 +25,13 @@ const inputToDeadline = (value: string) => value.trim() || NO_DEADLINE;
 
 // Extracted items awaiting review live only in the browser.
 // `id` is a client-side key; approved items get a backend id once saved.
-type Candidate = ActionItem & { id: number };
+type Candidate = AnalyzedItem & { id: number };
+
+// Adds newly returned tasks to the list; tasks already shown (same id) are not repeated.
+function mergeSaved(list: SavedTask[], incoming: SavedTask[]): SavedTask[] {
+  const ids = new Set(list.map((t) => t.id));
+  return [...list, ...incoming.filter((t) => !ids.has(t.id) && ids.add(t.id))];
+}
 
 // What "Undo" can bring back: a discarded candidate, or a deleted saved task.
 type Undo =
@@ -95,7 +101,7 @@ export default function App() {
     if (!created) return; // error shown; candidates stay so nothing is lost
     const approvedIds = new Set(toApprove.map((c) => c.id));
     setCandidates((prev) => prev && prev.filter((c) => !approvedIds.has(c.id)));
-    setSaved((prev) => [...prev, ...created]);
+    setSaved((prev) => mergeSaved(prev, created));
     setUndo(null);
   }
 
@@ -140,9 +146,16 @@ export default function App() {
     const { id: _id, created_at: _created, ...item } = undo.item;
     const created = await run(() => saveTasks([item]));
     if (!created) return;
-    setSaved((prev) => [...prev, ...created]);
+    setSaved((prev) => mergeSaved(prev, created));
     setUndo(null);
   }
+
+  // A candidate is "already saved" while the task it duplicates is still in the saved list
+  // (if that task gets deleted, the candidate becomes approvable again).
+  const savedIds = new Set(saved.map((t) => t.id));
+  const isAlreadySaved = (c: Candidate) => c.duplicate_of !== null && savedIds.has(c.duplicate_of);
+  const newCandidates = candidates?.filter((c) => !isAlreadySaved(c)) ?? [];
+  const duplicateCount = (candidates?.length ?? 0) - newCandidates.length;
 
   const doneCount = saved.filter((t) => t.completed).length;
 
@@ -182,12 +195,19 @@ export default function App() {
               To review
               {analyzer && <span className="badge">via {analyzer}</span>}
             </h2>
-            {candidates.length > 0 && (
-              <button className="secondary small" onClick={() => approve(candidates)} disabled={busy}>
-                Approve all ({candidates.length})
+            {newCandidates.length > 0 && (
+              <button className="secondary small" onClick={() => approve(newCandidates)} disabled={busy}>
+                Approve all ({newCandidates.length})
               </button>
             )}
           </div>
+          {duplicateCount > 0 && (
+            <p className="summary" data-testid="review-summary">
+              {newCandidates.length === 0
+                ? "All of these tasks are already saved."
+                : `${duplicateCount} already saved · ${newCandidates.length} new`}
+            </p>
+          )}
 
           {candidates.length === 0 ? (
             <p className="empty">
@@ -201,8 +221,10 @@ export default function App() {
                 <tr><th>Task</th><th>Owner</th><th>Deadline</th><th>Review</th></tr>
               </thead>
               <tbody>
-                {candidates.map((item) => (
-                  <tr key={item.id}>
+                {candidates.map((item) => {
+                  const alreadySaved = isAlreadySaved(item);
+                  return (
+                  <tr key={item.id} className={alreadySaved ? "duplicate" : undefined}>
                     <td className="task">
                       {item.task}
                       {item.kind === "suggestion" && <span className="tag">suggestion</span>}
@@ -211,6 +233,7 @@ export default function App() {
                       <input
                         className="cell-input owner-input"
                         value={item.owner}
+                        disabled={alreadySaved}
                         onChange={(e) => editCandidate(item.id, { owner: e.target.value })}
                         aria-label={`Owner of "${item.task}"`}
                       />
@@ -220,22 +243,30 @@ export default function App() {
                         className="cell-input deadline-input"
                         value={deadlineToInput(item.deadline)}
                         placeholder={NO_DEADLINE}
+                        disabled={alreadySaved}
                         onChange={(e) => editCandidate(item.id, { deadline: inputToDeadline(e.target.value) })}
                         aria-label={`Deadline of "${item.task}"`}
                       />
                     </td>
                     <td className="review">
-                      <button className="small approve" onClick={() => approve([item])} disabled={busy}
-                        aria-label={`Approve "${item.task}"`}>
-                        Approve
-                      </button>
+                      {alreadySaved ? (
+                        <span className="saved-label" title="This task is already in your saved tasks">
+                          Already saved
+                        </span>
+                      ) : (
+                        <button className="small approve" onClick={() => approve([item])} disabled={busy}
+                          aria-label={`Approve "${item.task}"`}>
+                          Approve
+                        </button>
+                      )}
                       <button className="small ghost" onClick={() => discard(item.id)} disabled={busy}
                         aria-label={`Discard "${item.task}"`}>
-                        Discard
+                        {alreadySaved ? "Dismiss" : "Discard"}
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}

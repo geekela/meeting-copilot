@@ -6,8 +6,13 @@ export interface ActionItem {
   kind: "commitment" | "suggestion";
 }
 
+/** An extracted item; `duplicate_of` is the id of a saved task it repeats, if any. */
+export interface AnalyzedItem extends ActionItem {
+  duplicate_of: number | null;
+}
+
 export interface AnalyzeResponse {
-  action_items: ActionItem[];
+  action_items: AnalyzedItem[];
   analyzer: string; // "mock" | "anthropic"
 }
 
@@ -48,9 +53,13 @@ export function listTasks(): Promise<SavedTask[]> {
   return request("/api/tasks");
 }
 
-/** Saves one or more approved items in a single all-or-nothing request. */
+/**
+ * Saves one or more approved items in a single all-or-nothing request.
+ * Returns one task per item; an item that was already saved returns the existing task.
+ */
 export function saveTasks(tasks: (ActionItem & { completed?: boolean })[]): Promise<SavedTask[]> {
-  return request("/api/tasks", { method: "POST", body: JSON.stringify({ tasks }) });
+  const body = tasks.map(({ task, owner, deadline, kind, completed }) => ({ task, owner, deadline, kind, completed }));
+  return request("/api/tasks", { method: "POST", body: JSON.stringify({ tasks: body }) });
 }
 
 export function updateTask(id: number, changes: TaskChanges): Promise<SavedTask> {

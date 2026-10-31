@@ -33,6 +33,10 @@ automatically, not committed; move it with `TASKS_DB`). API:
 | `PATCH` | `/api/tasks/{id}` | Update `owner`, `deadline` and/or `completed` |
 | `DELETE` | `/api/tasks/{id}` | Delete a saved task |
 
+Tasks are never saved twice: `/api/analyze` marks items that match a saved task
+(`duplicate_of`), and `POST /api/tasks` returns the existing task instead of storing a
+copy. Matching ignores case, punctuation and articles ("Book the venue." = "book venue").
+
 Run the tests with `pytest`. They always use the mock analyzer and a throwaway database, so they never call the API or touch your saved tasks.
 
 ### Frontend

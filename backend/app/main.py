@@ -13,8 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .analyzer import Analyzer, AnalyzerError, get_analyzer
-from .schemas import AnalyzeRequest, AnalyzeResponse, Task, TaskCreateRequest, TaskUpdate
-from .tasks import TaskStore, get_store
+from .schemas import AnalyzedItem, AnalyzeRequest, AnalyzeResponse, Task, TaskCreateRequest, TaskUpdate
+from .tasks import TaskStore, get_store, task_key
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,11 @@ def health() -> dict:
 
 
 @app.post("/api/analyze", response_model=AnalyzeResponse)
-def analyze(req: AnalyzeRequest, analyzer: Analyzer = Depends(get_analyzer)) -> AnalyzeResponse:
+def analyze(
+    req: AnalyzeRequest,
+    analyzer: Analyzer = Depends(get_analyzer),
+    store: TaskStore = Depends(get_store),
+) -> AnalyzeResponse:
     if not req.notes.strip():
         raise HTTPException(status_code=422, detail="Notes must not be blank.")
     try:
@@ -51,7 +55,20 @@ def analyze(req: AnalyzeRequest, analyzer: Analyzer = Depends(get_analyzer)) -> 
     except Exception as exc:  # unexpected bug: log the type only, return a generic message
         logger.exception("Unexpected analyzer failure: %s", type(exc).__name__)
         raise HTTPException(status_code=502, detail="Analysis failed unexpectedly.") from exc
-    return AnalyzeResponse(action_items=items, analyzer=analyzer.name)
+    return AnalyzeResponse(action_items=mark_duplicates(items, store.keys()), analyzer=analyzer.name)
+
+
+def mark_duplicates(items, saved_keys: dict[str, int]) -> list[AnalyzedItem]:
+    """Flag items that are already saved; drop repeats within the same result."""
+    seen: set[str] = set()
+    result = []
+    for item in items:
+        key = task_key(item.task)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(AnalyzedItem(**item.model_dump(), duplicate_of=saved_keys.get(key)))
+    return result
 
 
 # --- Saved (approved) tasks -------------------------------------------------

@@ -22,7 +22,14 @@ class ExtractedActionItems(BaseModel):
     action_items: list[ActionItem]
 
 
-class AnalyzeResponse(ExtractedActionItems):
+class AnalyzedItem(ActionItem):
+    # Additive field, set by the API (not the model): id of an already-saved task
+    # that this item duplicates, or None if it is new.
+    duplicate_of: int | None = None
+
+
+class AnalyzeResponse(BaseModel):
+    action_items: list[AnalyzedItem]
     # Additive field: which analyzer produced the result ("mock" or "anthropic").
     analyzer: str
 
