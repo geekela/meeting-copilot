@@ -8,13 +8,22 @@ from dotenv import load_dotenv
 # Variables already set in the shell take precedence over the file.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .analyzer import Analyzer, AnalyzerError, get_analyzer
-from .schemas import AnalyzedItem, AnalyzeRequest, AnalyzeResponse, Task, TaskCreateRequest, TaskUpdate
+from .schemas import (
+    AnalyzedItem,
+    AnalyzeRequest,
+    AnalyzeResponse,
+    Task,
+    TaskCreateRequest,
+    TaskUpdate,
+    TranscribeResponse,
+)
 from .tasks import TaskStore, get_store, task_key
+from .transcriber import Transcriber, TranscriberError, get_transcriber
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +42,15 @@ app.add_middleware(
 def analyzer_error_handler(_: Request, exc: AnalyzerError) -> JSONResponse:
     # Same {"detail": ...} shape as HTTPException, so the frontend handles both alike.
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+
+@app.exception_handler(TranscriberError)
+def transcriber_error_handler(_: Request, exc: TranscriberError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+
+# 90 minutes at 32 kbps is about 22 MB; leave headroom for other encoders.
+MAX_AUDIO_BYTES = 50 * 1024 * 1024
 
 
 @app.get("/api/health")
@@ -56,6 +74,24 @@ def analyze(
         logger.exception("Unexpected analyzer failure: %s", type(exc).__name__)
         raise HTTPException(status_code=502, detail="Analysis failed unexpectedly.") from exc
     return AnalyzeResponse(action_items=mark_duplicates(items, store.keys()), analyzer=analyzer.name)
+
+
+@app.post("/api/transcribe", response_model=TranscribeResponse)
+def transcribe(audio: UploadFile, transcriber: Transcriber = Depends(get_transcriber)) -> TranscribeResponse:
+    # Held in memory for this request only: never written to disk or logged.
+    data = audio.file.read(MAX_AUDIO_BYTES + 1)
+    if not data:
+        raise HTTPException(status_code=422, detail="The recording is empty.")
+    if len(data) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="The recording is too large to transcribe.")
+    try:
+        text = transcriber.transcribe(data, audio.filename or "recording.webm", audio.content_type or "audio/webm")
+    except TranscriberError:
+        raise
+    except Exception as exc:  # unexpected bug: log the type only
+        logger.exception("Unexpected transcriber failure: %s", type(exc).__name__)
+        raise HTTPException(status_code=502, detail="Transcription failed unexpectedly.") from exc
+    return TranscribeResponse(transcript=text, transcriber=transcriber.name)
 
 
 def mark_duplicates(items, saved_keys: dict[str, int]) -> list[AnalyzedItem]:
