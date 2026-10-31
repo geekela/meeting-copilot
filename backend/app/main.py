@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -20,7 +21,8 @@ app = FastAPI(title="AI Meeting Copilot")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5174", "http://127.0.0.1:5174"],
+    # Comma-separated list; the default matches the Vite dev server.
+    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5174,http://127.0.0.1:5174").split(","),
     allow_methods=["*"],
     allow_headers=["*"],
 )

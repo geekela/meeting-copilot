@@ -30,3 +30,17 @@ cd frontend
 npm install
 npm run dev            # http://localhost:5174, talks to the backend on :8001
 ```
+
+## End-to-end tests
+
+Playwright drives the real UI in Chromium. The suite starts its own backend
+(port 8011) and frontend (port 5184), so it doesn't clash with your dev servers.
+
+```bash
+cd frontend
+npx playwright install chromium   # first time only
+npm run test:e2e                  # mock analyzer: offline, free
+npm run test:e2e:live             # real Claude via backend/.env (paid API calls)
+```
+
+Requires the backend virtualenv at `backend/.venv` (see above).

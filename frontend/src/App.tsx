@@ -22,6 +22,9 @@ export default function App() {
   async function handleAnalyze() {
     setLoading(true);
     setError(null);
+    // Drop the previous results so they are never mistaken for the new analysis.
+    setItems(null);
+    setAnalyzer(null);
     try {
       const result = await analyzeNotes(notes);
       // Each analysis replaces previous edits with a fresh editable set.
