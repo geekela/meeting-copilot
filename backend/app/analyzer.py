@@ -1,7 +1,7 @@
 """Analysis boundary.
 
 Every analyzer implements `analyze(notes) -> list[ActionItem]`.
-Implementations are selected via the ANALYZER env var (mock | anthropic)
+Implementations are selected via the ANALYZER env var (anthropic [default] | mock)
 without touching the API contract or the frontend.
 """
 import os
@@ -75,7 +75,7 @@ class MockAnalyzer:
 
 
 def get_analyzer() -> Analyzer:
-    kind = os.getenv("ANALYZER", "mock")
+    kind = os.getenv("ANALYZER", "anthropic")
     if kind == "mock":
         return MockAnalyzer()
     if kind == "anthropic":
