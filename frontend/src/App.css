@@ -112,3 +112,20 @@ button.undo-button { min-height: 36px; padding: 0 12px; background: transparent;
   .lead { font-size: 24px; }
   .panel { padding: 16px; }
 }
+
+/* Recorder */
+.recorder { display: flex; flex-direction: column; gap: 10px; }
+.recorder-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); flex: none; }
+.rec-dot.idle { background: var(--accent); }
+.rec-live { display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 14px; color: var(--danger); }
+.rec-live .rec-dot { animation: rec-pulse 1.2s ease-in-out infinite; }
+@keyframes rec-pulse { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .rec-live .rec-dot { animation: none; } }
+button.stop { background: var(--danger); color: #fff; }
+button.stop:hover:not(:disabled) { background: #7f1d1d; }
+.stop-square { width: 10px; height: 10px; border-radius: 2px; background: currentColor; }
+.rec-status { color: var(--muted); font-size: 14px; }
+.rec-warning { margin: 0; padding: 8px 12px; border-radius: 8px; background: var(--danger-soft); color: #7f1d1d; font-size: 14px; }
+.rec-notice { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 8px; background: var(--info-soft); color: var(--info); font-size: 14px; }
+.rec-notice-actions { display: inline-flex; gap: 6px; }
