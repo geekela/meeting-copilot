@@ -30,7 +30,7 @@ automatically, not committed; move it with `TASKS_DB`). API:
 | `POST` | `/api/analyze` | Extract candidate tasks from notes |
 | `GET` | `/api/tasks` | List saved tasks |
 | `POST` | `/api/tasks` | Save approved tasks (`{"tasks": [...]}`, all-or-nothing) |
-| `PATCH` | `/api/tasks/{id}` | Update `owner` and/or `completed` |
+| `PATCH` | `/api/tasks/{id}` | Update `owner`, `deadline` and/or `completed` |
 | `DELETE` | `/api/tasks/{id}` | Delete a saved task |
 
 Run the tests with `pytest`. They always use the mock analyzer and a throwaway database, so they never call the API or touch your saved tasks.

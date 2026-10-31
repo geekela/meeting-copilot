@@ -44,6 +44,7 @@ class TaskCreateRequest(BaseModel):
 class TaskUpdate(BaseModel):
     """Partial update; only the fields a user can change after approval."""
     owner: str | None = Field(None, max_length=200)
+    deadline: str | None = Field(None, max_length=200)
     completed: bool | None = None
 
 

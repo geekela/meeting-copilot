@@ -56,12 +56,12 @@ test("extracts action items end to end", async ({ page }) => {
   const alice = byOwner(review(page), "Alice");
   await expect(alice).toHaveCount(1);
   await expect(alice.locator(".task")).toContainText(/proposal/i);
-  await expect(alice.locator(".deadline")).toContainText(/friday/i);
+  await expect(alice.locator(".deadline-input")).toHaveValue(/friday/i);
 
   const bob = byOwner(review(page), "Bob");
   await expect(bob).toHaveCount(1);
   await expect(bob.locator(".task")).toContainText(/budget/i);
-  await expect(bob.locator(".deadline")).toContainText(/next week/i);
+  await expect(bob.locator(".deadline-input")).toHaveValue(/next week/i);
 });
 
 test("casual notes produce four tasks to review, including suggestions", async ({ page }) => {
@@ -150,6 +150,33 @@ test("saved tasks can be completed, reassigned and deleted, and changes persist"
   await expect(saved(page)).toHaveCount(total - 1);
   await page.reload();
   await expect(saved(page)).toHaveCount(total - 1);
+});
+
+test("deadlines can be written before approving and edited after saving", async ({ page }) => {
+  await analyze(page, CASUAL_NOTES);
+  const ari = byOwner(review(page), "Ari");
+  const deadline = ari.locator(".deadline-input");
+  await expect(deadline).toHaveValue(""); // "No deadline" shows as an empty field
+  await expect(deadline).toHaveAttribute("placeholder", "No deadline");
+  await deadline.fill("next Friday");
+  await ari.getByRole("button", { name: /^Approve/ }).click();
+
+  const savedAri = byOwner(saved(page), "Ari");
+  await expect(savedAri.locator(".deadline-input")).toHaveValue("next Friday");
+
+  // Edit after saving: saved on Enter, persists across reload.
+  await savedAri.locator(".deadline-input").fill("end of Q3");
+  await savedAri.locator(".deadline-input").press("Enter");
+  await page.reload();
+  await expect(byOwner(saved(page), "Ari").locator(".deadline-input")).toHaveValue("end of Q3");
+
+  // Clearing the field stores "No deadline".
+  const patch = page.waitForRequest((r) => r.method() === "PATCH");
+  await byOwner(saved(page), "Ari").locator(".deadline-input").fill("");
+  await byOwner(saved(page), "Ari").locator(".deadline-input").press("Enter");
+  expect((await patch).postDataJSON()).toEqual({ deadline: "No deadline" });
+  await page.reload();
+  await expect(byOwner(saved(page), "Ari").locator(".deadline-input")).toHaveValue("");
 });
 
 test("a failed save keeps the task in review and shows the error", async ({ page }) => {

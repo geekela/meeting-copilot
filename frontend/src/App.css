@@ -11,8 +11,9 @@ button.secondary { background: #e5e5e5; color: #222; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 10px; border-bottom: 1px solid #e5e5e5; text-align: left; }
 th { background: #f7f7f7; font-size: 0.9rem; }
-.owner-input { width: 100%; box-sizing: border-box; padding: 6px 8px; font: inherit; border: 1px solid transparent; border-radius: 6px; background: transparent; }
-.owner-input:hover, .owner-input:focus { border-color: #ccc; background: #fff; outline: none; }
+
+.cell-input { width: 100%; box-sizing: border-box; padding: 6px 8px; font: inherit; border: 1px solid transparent; border-radius: 6px; background: transparent; }
+.cell-input:hover, .cell-input:focus { border-color: #ccc; background: #fff; outline: none; }
 tr.completed .task { text-decoration: line-through; color: #999; }
 .badge { margin-left: 10px; padding: 2px 8px; border-radius: 999px; background: #f2f2f2; color: #555; font-size: 0.75rem; font-weight: 500; vertical-align: middle; }
 
@@ -32,3 +33,5 @@ td.deadline { white-space: nowrap; }
 .review-section { margin-bottom: 32px; padding: 16px; border-radius: 10px; background: #fffaf5; border: 1px solid #f6dcc8; }
 .review-section table th { background: #fbeee3; }
 .saved-section .results-header h2 { margin-top: 8px; }
+.cell-input::placeholder { color: #999; }
+.deadline-input { min-width: 110px; }

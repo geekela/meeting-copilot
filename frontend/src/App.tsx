@@ -18,6 +18,11 @@ Action: schedule a follow-up workshop.
 Sam mentioned a nice vegan restaurant for the team dinner.
 We discussed the timeline and everyone agreed it looks fine.`;
 
+const NO_DEADLINE = "No deadline";
+// Deadlines are free text. An empty field means (and is stored as) "No deadline".
+const deadlineToInput = (deadline: string) => (deadline === NO_DEADLINE ? "" : deadline);
+const inputToDeadline = (value: string) => value.trim() || NO_DEADLINE;
+
 // Extracted items awaiting review live only in the browser.
 // `id` is a client-side key; approved items get a backend id once saved.
 type Candidate = ActionItem & { id: number };
@@ -80,8 +85,8 @@ export default function App() {
 
   // --- Review: candidates -> saved -----------------------------------------
 
-  function editCandidate(id: number, owner: string) {
-    setCandidates((prev) => prev && prev.map((c) => (c.id === id ? { ...c, owner } : c)));
+  function editCandidate(id: number, changes: Partial<Pick<Candidate, "owner" | "deadline">>) {
+    setCandidates((prev) => prev && prev.map((c) => (c.id === id ? { ...c, ...changes } : c)));
   }
 
   async function approve(toApprove: Candidate[]) {
@@ -204,13 +209,21 @@ export default function App() {
                     </td>
                     <td>
                       <input
-                        className="owner-input"
+                        className="cell-input owner-input"
                         value={item.owner}
-                        onChange={(e) => editCandidate(item.id, e.target.value)}
+                        onChange={(e) => editCandidate(item.id, { owner: e.target.value })}
                         aria-label={`Owner of "${item.task}"`}
                       />
                     </td>
-                    <td className="deadline">{item.deadline}</td>
+                    <td className="deadline">
+                      <input
+                        className="cell-input deadline-input"
+                        value={deadlineToInput(item.deadline)}
+                        placeholder={NO_DEADLINE}
+                        onChange={(e) => editCandidate(item.id, { deadline: inputToDeadline(e.target.value) })}
+                        aria-label={`Deadline of "${item.task}"`}
+                      />
+                    </td>
                     <td className="review">
                       <button className="small approve" onClick={() => approve([item])} disabled={busy}
                         aria-label={`Approve "${item.task}"`}>
@@ -247,7 +260,7 @@ export default function App() {
             </thead>
             <tbody>
               {saved.map((task) => (
-                <SavedRow key={`${task.id}:${task.owner}`} task={task} busy={busy} onChange={changeSaved} onDelete={removeSaved} />
+                <SavedRow key={`${task.id}:${task.owner}:${task.deadline}`} task={task} busy={busy} onChange={changeSaved} onDelete={removeSaved} />
               ))}
             </tbody>
           </table>
@@ -268,13 +281,20 @@ function SavedRow({
   onChange: (id: number, changes: TaskChanges) => void;
   onDelete: (task: SavedTask) => void;
 }) {
-  // Edit the owner locally and save on blur/Enter, not on every keystroke.
-  // The parent keys this row by id+owner, so a saved change resets local state.
+  // Edit text fields locally and save on blur/Enter, not on every keystroke.
+  // The parent keys this row by id+owner+deadline, so a saved change resets local state.
   const [owner, setOwner] = useState(task.owner);
+  const [deadline, setDeadline] = useState(deadlineToInput(task.deadline));
   const commitOwner = () => {
     if (owner.trim() && owner !== task.owner) onChange(task.id, { owner });
     else setOwner(task.owner);
   };
+  const commitDeadline = () => {
+    const next = inputToDeadline(deadline);
+    if (next !== task.deadline) onChange(task.id, { deadline: next });
+    else setDeadline(deadlineToInput(task.deadline));
+  };
+  const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => e.key === "Enter" && e.currentTarget.blur();
 
   return (
     <tr className={task.completed ? "completed" : undefined}>
@@ -293,15 +313,25 @@ function SavedRow({
       </td>
       <td>
         <input
-          className="owner-input"
+          className="cell-input owner-input"
           value={owner}
           onChange={(e) => setOwner(e.target.value)}
           onBlur={commitOwner}
-          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+          onKeyDown={blurOnEnter}
           aria-label={`Owner of "${task.task}"`}
         />
       </td>
-      <td className="deadline">{task.deadline}</td>
+      <td className="deadline">
+        <input
+          className="cell-input deadline-input"
+          value={deadline}
+          placeholder={NO_DEADLINE}
+          onChange={(e) => setDeadline(e.target.value)}
+          onBlur={commitDeadline}
+          onKeyDown={blurOnEnter}
+          aria-label={`Deadline of "${task.task}"`}
+        />
+      </td>
       <td className="review">
         <button className="small ghost" onClick={() => onDelete(task)} disabled={busy}
           aria-label={`Delete "${task.task}"`}>

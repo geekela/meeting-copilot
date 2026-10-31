@@ -44,6 +44,14 @@ def test_update_owner_and_completed():
     assert res.json()["owner"] == "Carla" and res.json()["completed"] is False
 
 
+def test_update_deadline():
+    task_id = save(ARI)[0]["id"]
+    res = client.patch(f"/api/tasks/{task_id}", json={"deadline": "next Friday"})
+    assert res.status_code == 200
+    assert res.json()["deadline"] == "next Friday" and res.json()["owner"] == "Ari"
+    assert client.get("/api/tasks").json()[0]["deadline"] == "next Friday"
+
+
 def test_update_ignores_fields_that_cannot_change():
     task_id = save(ARI)[0]["id"]
     res = client.patch(f"/api/tasks/{task_id}", json={"task": "Hacked", "id": 999})

@@ -18,7 +18,7 @@ export interface SavedTask extends ActionItem {
   created_at: string;
 }
 
-export type TaskChanges = Partial<Pick<SavedTask, "owner" | "completed">>;
+export type TaskChanges = Partial<Pick<SavedTask, "owner" | "deadline" | "completed">>;
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8001";
 
