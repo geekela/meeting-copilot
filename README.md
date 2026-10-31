@@ -22,7 +22,18 @@ uvicorn app.main:app --reload --port 8001
 (`ANALYZER=anthropic`) by default. Set `ANALYZER=mock` for an offline,
 rule-based analyzer that makes no API calls.
 
-Run the tests with `pytest`. They always use the mock analyzer and never call the API.
+Approved tasks are saved in a SQLite file at `backend/data/tasks.db` (created
+automatically, not committed; move it with `TASKS_DB`). API:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/analyze` | Extract candidate tasks from notes |
+| `GET` | `/api/tasks` | List saved tasks |
+| `POST` | `/api/tasks` | Save approved tasks (`{"tasks": [...]}`, all-or-nothing) |
+| `PATCH` | `/api/tasks/{id}` | Update `owner` and/or `completed` |
+| `DELETE` | `/api/tasks/{id}` | Delete a saved task |
+
+Run the tests with `pytest`. They always use the mock analyzer and a throwaway database, so they never call the API or touch your saved tasks.
 
 ### Frontend
 ```bash

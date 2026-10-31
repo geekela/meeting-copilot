@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { API_URL } from "../playwright.config";
 
 // Runs against the mock analyzer by default; E2E_LIVE=1 runs the same checks against Claude.
 const ANALYZER = process.env.E2E_LIVE === "1" ? "anthropic" : "mock";
@@ -8,17 +9,31 @@ Alice will send the revised proposal to the client by Friday.
 Bob to update the budget spreadsheet before next week.
 We discussed the timeline and everyone agreed it looks fine.`;
 
+const CASUAL_NOTES = `ari takes care of booking venue
+sam mentioned a nice vegan food restaurant
+jules sends out invitations
+
+mark says he would like to get drinks`;
+
 const notesBox = (page: Page) => page.getByPlaceholder("Paste meeting notes here...");
 const analyzeButton = (page: Page) => page.getByRole("button", { name: "Analyze" });
-const rows = (page: Page) => page.locator("tbody tr");
+const review = (page: Page) => page.getByTestId("review-table").locator("tbody tr");
+const saved = (page: Page) => page.getByTestId("saved-table").locator("tbody tr");
+const savedSummary = (page: Page) => page.getByTestId("saved-summary");
+const byOwner = (rows: ReturnType<typeof review>, owner: string) =>
+  rows.filter({ has: rows.page().locator(`input[aria-label^="Owner"]`).and(rows.page().locator(`[value="${owner}"]`)) });
 
 async function analyze(page: Page, notes: string) {
   await notesBox(page).fill(notes);
   await analyzeButton(page).click();
 }
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, request }) => {
+  // Start every test with no saved tasks.
+  const tasks: { id: number }[] = await (await request.get(`${API_URL}/api/tasks`)).json();
+  await Promise.all(tasks.map((t) => request.delete(`${API_URL}/api/tasks/${t.id}`)));
   await page.goto("/");
+  await expect(page.getByText("No saved tasks yet.")).toBeVisible();
 });
 
 test("page loads and Analyze needs notes", async ({ page }) => {
@@ -36,94 +51,137 @@ test("extracts action items end to end", async ({ page }) => {
   const body = await (await response).json();
 
   await expect(page.locator(".badge")).toHaveText(`via ${ANALYZER}`);
-  await expect(rows(page)).toHaveCount(body.action_items.length);
+  await expect(review(page)).toHaveCount(body.action_items.length);
 
-  const alice = rows(page).filter({ has: page.locator('input[value="Alice"]') });
+  const alice = byOwner(review(page), "Alice");
   await expect(alice).toHaveCount(1);
   await expect(alice.locator(".task")).toContainText(/proposal/i);
-  await expect(alice.locator("td").nth(3)).toContainText(/friday/i);
+  await expect(alice.locator(".deadline")).toContainText(/friday/i);
 
-  const bob = rows(page).filter({ has: page.locator('input[value="Bob"]') });
+  const bob = byOwner(review(page), "Bob");
   await expect(bob).toHaveCount(1);
   await expect(bob.locator(".task")).toContainText(/budget/i);
-  await expect(bob.locator("td").nth(3)).toContainText(/next week/i);
+  await expect(bob.locator(".deadline")).toContainText(/next week/i);
 });
-
-test("items can be completed and reassigned once approved", async ({ page }) => {
-  await analyze(page, NOTES);
-  await expect(rows(page).first()).toBeVisible();
-  const total = await rows(page).count();
-  const first = rows(page).first();
-
-  // Pending tasks cannot be ticked off.
-  await expect(first.getByRole("checkbox")).toBeDisabled();
-  await first.getByRole("button", { name: /^Approve/ }).click();
-  await first.getByRole("checkbox").check();
-  await expect(page.getByTestId("summary")).toHaveText(`1 approved · ${total - 1} to review · 1/1 done`);
-  await expect(first).toHaveClass(/completed/);
-
-  const owner = rows(page).last().locator(".owner-input");
-  await owner.fill("Carla");
-  await expect(owner).toHaveValue("Carla");
-});
-
-const CASUAL_NOTES = `ari takes care of booking venue
-sam mentioned a nice vegan food restaurant
-jules sends out invitations
-
-mark says he would like to get drinks`;
 
 test("casual notes produce four tasks to review, including suggestions", async ({ page }) => {
   await analyze(page, CASUAL_NOTES);
-  await expect(rows(page)).toHaveCount(4);
-  await expect(page.locator('tr[data-status="pending"]')).toHaveCount(4);
+  await expect(review(page)).toHaveCount(4);
   for (const name of ["Ari", "Sam", "Jules", "Mark"]) {
-    await expect(page.locator(`input[value="${name}"]`)).toHaveCount(1);
+    await expect(byOwner(review(page), name)).toHaveCount(1);
   }
-  const suggestions = rows(page).filter({ has: page.locator(".tag", { hasText: "suggestion" }) });
-  await expect(suggestions).toHaveCount(2);
-  await expect(page.getByTestId("summary")).toHaveText("0 approved · 4 to review · 0/0 done");
+  await expect(review(page).filter({ has: page.locator(".tag", { hasText: "suggestion" }) })).toHaveCount(2);
+  await expect(savedSummary(page)).toHaveText("0 saved · 0/0 done");
 });
 
-test("tasks can be approved, removed and restored", async ({ page }) => {
+test("approved tasks are saved and survive a page reload", async ({ page }) => {
   await analyze(page, CASUAL_NOTES);
-  await expect(rows(page)).toHaveCount(4);
+  await expect(review(page)).toHaveCount(4);
 
-  const ari = rows(page).filter({ has: page.locator('input[value="Ari"]') });
-  await ari.getByRole("button", { name: /^Approve/ }).click();
-  await expect(ari).toHaveAttribute("data-status", "approved");
-  await expect(ari.getByText("✓ Approved")).toBeVisible();
+  // Edit the owner before approving: the edited value is what gets saved.
+  const ari = byOwner(review(page), "Ari");
+  await ari.locator(".owner-input").fill("Ariana");
+  await byOwner(review(page), "Ariana").getByRole("button", { name: /^Approve/ }).click();
+  await byOwner(review(page), "Jules").getByRole("button", { name: /^Approve/ }).click();
 
-  const mark = rows(page).filter({ has: page.locator('input[value="Mark"]') });
-  await mark.getByRole("button", { name: /^Remove/ }).click();
-  await expect(rows(page)).toHaveCount(3);
-  await expect(page.locator('input[value="Mark"]')).toHaveCount(0);
-  await expect(page.getByTestId("summary")).toHaveText("1 approved · 2 to review · 0/1 done");
+  await expect(review(page)).toHaveCount(2);
+  await expect(saved(page)).toHaveCount(2);
+  await expect(savedSummary(page)).toHaveText("2 saved · 0/2 done");
+
+  await page.reload();
+  await expect(saved(page)).toHaveCount(2);
+  await expect(byOwner(saved(page), "Ariana")).toHaveCount(1);
+  await expect(byOwner(saved(page), "Jules")).toHaveCount(1);
+  await expect(page.getByTestId("review-table")).toHaveCount(0); // unreviewed items are not kept
+});
+
+test("Approve all saves every task in one go", async ({ page }) => {
+  await analyze(page, CASUAL_NOTES);
+  const post = page.waitForRequest((r) => r.url().endsWith("/api/tasks") && r.method() === "POST");
+  await page.getByRole("button", { name: "Approve all (4)" }).click();
+  expect((await post).postDataJSON().tasks).toHaveLength(4);
+
+  await expect(saved(page)).toHaveCount(4);
+  await expect(page.getByText("Nothing left to review.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Approve all/ })).toHaveCount(0);
+  await page.reload();
+  await expect(saved(page)).toHaveCount(4);
+});
+
+test("discarded tasks are not saved and can be restored", async ({ page }) => {
+  await analyze(page, CASUAL_NOTES);
+  await byOwner(review(page), "Mark").getByRole("button", { name: /^Discard/ }).click();
+  await expect(review(page)).toHaveCount(3);
+  await expect(page.getByRole("status")).toContainText("Discarded");
 
   await page.getByRole("button", { name: "Undo" }).click();
-  await expect(rows(page)).toHaveCount(4);
-  await expect(rows(page).last().locator(".owner-input")).toHaveValue("Mark"); // back in its original place
-  await expect(page.getByRole("button", { name: "Undo" })).toHaveCount(0);
+  await expect(review(page)).toHaveCount(4);
+  await expect(review(page).last().locator(".owner-input")).toHaveValue("Mark"); // original position
+  await expect(saved(page)).toHaveCount(0);
 });
 
-test("Approve all approves every pending task", async ({ page }) => {
-  await analyze(page, CASUAL_NOTES);
-  await page.getByRole("button", { name: "Approve all (4)" }).click();
-  await expect(page.locator('tr[data-status="approved"]')).toHaveCount(4);
-  await expect(page.getByRole("button", { name: /Approve all/ })).toHaveCount(0);
-  await expect(page.getByTestId("summary")).toHaveText("4 approved · 0 to review · 0/4 done");
+test("saved tasks can be completed, reassigned and deleted, and changes persist", async ({ page }) => {
+  await analyze(page, NOTES);
+  await page.getByRole("button", { name: /Approve all/ }).click();
+  await expect(saved(page).first()).toBeVisible();
+  const total = await saved(page).count();
+
+  await saved(page).first().getByRole("checkbox").check();
+  await expect(saved(page).first()).toHaveClass(/completed/);
+  await expect(savedSummary(page)).toHaveText(`${total} saved · 1/${total} done`);
+
+  const owner = saved(page).last().locator(".owner-input");
+  await owner.fill("Carla");
+  await owner.press("Enter");
+  await expect(byOwner(saved(page), "Carla")).toHaveCount(1);
+
+  await page.reload();
+  await expect(saved(page).first().getByRole("checkbox")).toBeChecked();
+  await expect(saved(page).last().locator(".owner-input")).toHaveValue("Carla");
+
+  // Delete, then undo restores it with the same content and status.
+  await saved(page).first().getByRole("button", { name: /^Delete/ }).click();
+  await expect(saved(page)).toHaveCount(total - 1);
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(saved(page)).toHaveCount(total);
+  await expect(saved(page).locator('input[type="checkbox"]:checked')).toHaveCount(1);
+
+  await saved(page).last().getByRole("button", { name: /^Delete/ }).click();
+  await expect(saved(page)).toHaveCount(total - 1);
+  await page.reload();
+  await expect(saved(page)).toHaveCount(total - 1);
 });
 
-test("removing every task shows an empty message", async ({ page }) => {
+test("a failed save keeps the task in review and shows the error", async ({ page }) => {
   await analyze(page, "Alice will call the client.");
-  await expect(rows(page)).toHaveCount(1);
-  await rows(page).first().getByRole("button", { name: /^Remove/ }).click();
-  await expect(page.getByText("All tasks removed.")).toBeVisible();
+  await page.route("**/api/tasks", (route) =>
+    route.request().method() === "POST"
+      ? route.fulfill({ status: 500, json: { detail: "Database is unavailable." } })
+      : route.continue(),
+  );
+  await review(page).first().getByRole("button", { name: /^Approve/ }).click();
+  await expect(page.getByRole("alert")).toHaveText("Database is unavailable.");
+  await expect(review(page)).toHaveCount(1);
+  await expect(saved(page)).toHaveCount(0);
+});
+
+test("a failed update rolls the saved task back", async ({ page }) => {
+  await analyze(page, "Alice will call the client.");
+  await page.getByRole("button", { name: /Approve all/ }).click();
+  await expect(saved(page)).toHaveCount(1);
+  await page.route("**/api/tasks/*", (route) =>
+    route.request().method() === "PATCH"
+      ? route.fulfill({ status: 500, json: { detail: "Could not save the change." } })
+      : route.continue(),
+  );
+  await saved(page).first().getByRole("checkbox").click();
+  await expect(page.getByRole("alert")).toHaveText("Could not save the change.");
+  await expect(saved(page).first().getByRole("checkbox")).not.toBeChecked();
 });
 
 test("previous results are cleared while a new analysis runs", async ({ page }) => {
   await analyze(page, NOTES);
-  await expect(rows(page).first()).toBeVisible();
+  await expect(review(page).first()).toBeVisible();
 
   // Hold the second request until we have checked the loading state.
   let release!: () => void;
@@ -135,12 +193,12 @@ test("previous results are cleared while a new analysis runs", async ({ page }) 
 
   await analyze(page, "Dan will ship the release tomorrow.");
   await expect(page.getByRole("button", { name: "Analyzing..." })).toBeDisabled();
-  await expect(rows(page)).toHaveCount(0);
+  await expect(page.getByTestId("review-table")).toHaveCount(0);
   await expect(page.locator(".badge")).toHaveCount(0);
 
   release();
   await expect(page.locator(".badge")).toHaveText(`via ${ANALYZER}`);
-  await expect(rows(page).first()).toBeVisible();
+  await expect(review(page).first()).toBeVisible();
 });
 
 test("shows an empty state when there are no action items", async ({ page }) => {
@@ -158,7 +216,7 @@ test("shows a friendly error when the backend is unreachable", async ({ page }) 
   await page.route("**/api/analyze", (route) => route.abort());
   await analyze(page, NOTES);
   await expect(page.getByRole("alert")).toHaveText(/cannot reach the backend/i);
-  await expect(rows(page)).toHaveCount(0);
+  await expect(page.getByTestId("review-table")).toHaveCount(0);
 });
 
 test("shows the backend's error message on failure", async ({ page }) => {

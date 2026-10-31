@@ -25,3 +25,28 @@ class ExtractedActionItems(BaseModel):
 class AnalyzeResponse(ExtractedActionItems):
     # Additive field: which analyzer produced the result ("mock" or "anthropic").
     analyzer: str
+
+
+# --- Saved (approved) tasks -------------------------------------------------
+
+class TaskCreate(ActionItem):
+    """An approved action item the user wants to keep."""
+    task: str = Field(..., min_length=1, max_length=500)
+    owner: str = Field("Unassigned", max_length=200)
+    deadline: str = Field("No deadline", max_length=200)
+    completed: bool = False
+
+
+class TaskCreateRequest(BaseModel):
+    tasks: list[TaskCreate] = Field(..., min_length=1, max_length=200)
+
+
+class TaskUpdate(BaseModel):
+    """Partial update; only the fields a user can change after approval."""
+    owner: str | None = Field(None, max_length=200)
+    completed: bool | None = None
+
+
+class Task(TaskCreate):
+    id: int
+    created_at: str

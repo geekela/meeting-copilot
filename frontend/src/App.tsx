@@ -1,5 +1,14 @@
-import { useState } from "react";
-import { analyzeNotes, type ActionItem } from "./api";
+import { useEffect, useState } from "react";
+import {
+  analyzeNotes,
+  deleteTask,
+  listTasks,
+  saveTasks,
+  updateTask,
+  type ActionItem,
+  type SavedTask,
+  type TaskChanges,
+} from "./api";
 import "./App.css";
 
 const SAMPLE = `Weekly sync - Q4 planning
@@ -9,80 +18,139 @@ Action: schedule a follow-up workshop.
 Sam mentioned a nice vegan restaurant for the team dinner.
 We discussed the timeline and everyone agreed it looks fine.`;
 
-// Frontend-only state layered on top of the API contract.
-// `id` is a client-side key so edits target one item; it is never sent to the backend.
-// Every extracted task starts as "pending" until the user approves or removes it.
-type ReviewStatus = "pending" | "approved";
-type EditableItem = ActionItem & { id: number; status: ReviewStatus; completed: boolean };
-type Removed = { item: EditableItem; index: number };
+// Extracted items awaiting review live only in the browser.
+// `id` is a client-side key; approved items get a backend id once saved.
+type Candidate = ActionItem & { id: number };
+
+// What "Undo" can bring back: a discarded candidate, or a deleted saved task.
+type Undo =
+  | { type: "candidate"; item: Candidate; index: number }
+  | { type: "saved"; item: SavedTask };
 
 export default function App() {
   const [notes, setNotes] = useState("");
-  const [items, setItems] = useState<EditableItem[] | null>(null);
-  const [lastRemoved, setLastRemoved] = useState<Removed | null>(null);
+  const [candidates, setCandidates] = useState<Candidate[] | null>(null);
+  const [saved, setSaved] = useState<SavedTask[]>([]);
+  const [savedLoaded, setSavedLoaded] = useState(false);
+  const [undo, setUndo] = useState<Undo | null>(null);
   const [analyzer, setAnalyzer] = useState<string | null>(null);
+  const [extractedCount, setExtractedCount] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false); // a save/delete request is in flight
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    listTasks()
+      .then(setSaved)
+      .catch((e) => setError(e instanceof Error ? e.message : "Could not load saved tasks"))
+      .finally(() => setSavedLoaded(true));
+  }, []);
+
+  async function run<T>(action: () => Promise<T>): Promise<T | undefined> {
+    setBusy(true);
+    setError(null);
+    try {
+      return await action();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unexpected error");
+      return undefined;
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleAnalyze() {
     setLoading(true);
     setError(null);
     // Drop the previous results so they are never mistaken for the new analysis.
-    setItems(null);
+    setCandidates(null);
     setAnalyzer(null);
-    setLastRemoved(null);
+    setUndo(null);
     try {
       const result = await analyzeNotes(notes);
-      // Each analysis replaces previous edits with a fresh set awaiting review.
-      setItems(result.action_items.map((item, i) => ({ ...item, id: i, status: "pending", completed: false })));
+      setCandidates(result.action_items.map((item, i) => ({ ...item, id: i })));
+      setExtractedCount(result.action_items.length);
       setAnalyzer(result.analyzer);
     } catch (e) {
-      setItems(null);
       setError(e instanceof Error ? e.message : "Unexpected error");
     } finally {
       setLoading(false);
     }
   }
 
-  // Immutable update: copy only the matching item, leave all others untouched.
-  function updateItem(id: number, changes: Partial<Pick<EditableItem, "owner" | "completed" | "status">>) {
-    setItems((prev) => prev && prev.map((item) => (item.id === id ? { ...item, ...changes } : item)));
+  // --- Review: candidates -> saved -----------------------------------------
+
+  function editCandidate(id: number, owner: string) {
+    setCandidates((prev) => prev && prev.map((c) => (c.id === id ? { ...c, owner } : c)));
   }
 
-  function approveAll() {
-    setItems((prev) => prev && prev.map((item) => ({ ...item, status: "approved" })));
+  async function approve(toApprove: Candidate[]) {
+    if (toApprove.length === 0) return;
+    const created = await run(() => saveTasks(toApprove.map(({ id: _id, ...item }) => item)));
+    if (!created) return; // error shown; candidates stay so nothing is lost
+    const approvedIds = new Set(toApprove.map((c) => c.id));
+    setCandidates((prev) => prev && prev.filter((c) => !approvedIds.has(c.id)));
+    setSaved((prev) => [...prev, ...created]);
+    setUndo(null);
   }
 
-  function removeItem(id: number) {
-    if (!items) return;
-    const index = items.findIndex((item) => item.id === id);
+  function discard(id: number) {
+    if (!candidates) return;
+    const index = candidates.findIndex((c) => c.id === id);
     if (index === -1) return;
-    setLastRemoved({ item: items[index], index });
-    setItems(items.filter((item) => item.id !== id));
+    setUndo({ type: "candidate", item: candidates[index], index });
+    setCandidates(candidates.filter((c) => c.id !== id));
   }
 
-  function undoRemove() {
-    if (!lastRemoved || !items) return;
-    const next = [...items];
-    next.splice(Math.min(lastRemoved.index, next.length), 0, lastRemoved.item);
-    setItems(next);
-    setLastRemoved(null);
+  // --- Saved tasks -----------------------------------------------------------
+
+  async function changeSaved(id: number, changes: TaskChanges) {
+    // Optimistic: show the change immediately, roll back if the backend rejects it.
+    const before = saved.find((t) => t.id === id);
+    if (!before) return;
+    setSaved((prev) => prev.map((t) => (t.id === id ? { ...t, ...changes } : t)));
+    const updated = await run(() => updateTask(id, changes));
+    setSaved((prev) => prev.map((t) => (t.id === id ? (updated ?? before) : t)));
   }
 
-  const approved = items?.filter((i) => i.status === "approved") ?? [];
-  const pendingCount = (items?.length ?? 0) - approved.length;
-  const doneCount = approved.filter((i) => i.completed).length;
+  async function removeSaved(task: SavedTask) {
+    const ok = await run(() => deleteTask(task.id).then(() => true));
+    if (!ok) return;
+    setSaved((prev) => prev.filter((t) => t.id !== task.id));
+    setUndo({ type: "saved", item: task });
+  }
+
+  async function handleUndo() {
+    if (!undo) return;
+    if (undo.type === "candidate") {
+      setCandidates((prev) => {
+        const next = [...(prev ?? [])];
+        next.splice(Math.min(undo.index, next.length), 0, undo.item);
+        return next;
+      });
+      setUndo(null);
+      return;
+    }
+    // Deleted saved task: save it again (it gets a new id, keeps its content and status).
+    const { id: _id, created_at: _created, ...item } = undo.item;
+    const created = await run(() => saveTasks([item]));
+    if (!created) return;
+    setSaved((prev) => [...prev, ...created]);
+    setUndo(null);
+  }
+
+  const doneCount = saved.filter((t) => t.completed).length;
 
   return (
     <main className="container">
       <h1>AI Meeting Copilot</h1>
-      <p className="subtitle">Paste your meeting notes to extract action items, then approve or remove each one.</p>
+      <p className="subtitle">Paste your meeting notes to extract action items, then approve the ones to keep.</p>
 
       <textarea
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
         placeholder="Paste meeting notes here..."
-        rows={10}
+        rows={8}
       />
       <div className="actions">
         <button onClick={handleAnalyze} disabled={loading || !notes.trim()}>
@@ -95,56 +163,41 @@ export default function App() {
 
       {error && <div className="error" role="alert">{error}</div>}
 
-      {items && (
-        <section>
+      {undo && (
+        <div className="undo" role="status">
+          {undo.type === "candidate" ? "Discarded" : "Deleted"} “{undo.item.task}”.
+          <button className="link" onClick={handleUndo} disabled={busy}>Undo</button>
+        </div>
+      )}
+
+      {candidates && (
+        <section className="review-section" aria-labelledby="review-heading">
           <div className="results-header">
-            <h2>
-              Action items
+            <h2 id="review-heading">
+              To review
               {analyzer && <span className="badge">via {analyzer}</span>}
             </h2>
-            {pendingCount > 0 && (
-              <button className="secondary small" onClick={approveAll}>
-                Approve all ({pendingCount})
+            {candidates.length > 0 && (
+              <button className="secondary small" onClick={() => approve(candidates)} disabled={busy}>
+                Approve all ({candidates.length})
               </button>
             )}
           </div>
-          <p className="summary" data-testid="summary">
-            {approved.length} approved · {pendingCount} to review · {doneCount}/{approved.length} done
-          </p>
 
-          {lastRemoved && (
-            <div className="undo" role="status">
-              Removed “{lastRemoved.item.task}”.
-              <button className="link" onClick={undoRemove}>Undo</button>
-            </div>
-          )}
-
-          {items.length === 0 ? (
+          {candidates.length === 0 ? (
             <p className="empty">
-              {lastRemoved ? "All tasks removed." : "No action items found in these notes."}
+              {extractedCount === 0
+                ? "No action items found in these notes."
+                : "Nothing left to review."}
             </p>
           ) : (
-            <table>
+            <table data-testid="review-table">
               <thead>
-                <tr><th>Done</th><th>Task</th><th>Owner</th><th>Deadline</th><th>Review</th></tr>
+                <tr><th>Task</th><th>Owner</th><th>Deadline</th><th>Review</th></tr>
               </thead>
               <tbody>
-                {items.map((item) => (
-                  <tr
-                    key={item.id}
-                    data-status={item.status}
-                    className={[item.status, item.completed ? "completed" : ""].join(" ").trim()}
-                  >
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={item.completed}
-                        disabled={item.status !== "approved"}
-                        title={item.status !== "approved" ? "Approve the task first" : undefined}
-                        onChange={() => updateItem(item.id, { completed: !item.completed })}
-                        aria-label={`Mark "${item.task}" as completed`}
-                      />
-                    </td>
+                {candidates.map((item) => (
+                  <tr key={item.id}>
                     <td className="task">
                       {item.task}
                       {item.kind === "suggestion" && <span className="tag">suggestion</span>}
@@ -153,23 +206,19 @@ export default function App() {
                       <input
                         className="owner-input"
                         value={item.owner}
-                        onChange={(e) => updateItem(item.id, { owner: e.target.value })}
+                        onChange={(e) => editCandidate(item.id, e.target.value)}
                         aria-label={`Owner of "${item.task}"`}
                       />
                     </td>
-                    <td>{item.deadline}</td>
+                    <td className="deadline">{item.deadline}</td>
                     <td className="review">
-                      {item.status === "pending" ? (
-                        <button className="small approve" onClick={() => updateItem(item.id, { status: "approved" })}
-                          aria-label={`Approve "${item.task}"`}>
-                          Approve
-                        </button>
-                      ) : (
-                        <span className="approved-label">✓ Approved</span>
-                      )}
-                      <button className="small ghost" onClick={() => removeItem(item.id)}
-                        aria-label={`Remove "${item.task}"`}>
-                        Remove
+                      <button className="small approve" onClick={() => approve([item])} disabled={busy}
+                        aria-label={`Approve "${item.task}"`}>
+                        Approve
+                      </button>
+                      <button className="small ghost" onClick={() => discard(item.id)} disabled={busy}
+                        aria-label={`Discard "${item.task}"`}>
+                        Discard
                       </button>
                     </td>
                   </tr>
@@ -179,6 +228,86 @@ export default function App() {
           )}
         </section>
       )}
+
+      <section className="saved-section" aria-labelledby="saved-heading">
+        <div className="results-header">
+          <h2 id="saved-heading">Saved tasks</h2>
+        </div>
+        <p className="summary" data-testid="saved-summary">
+          {saved.length} saved · {doneCount}/{saved.length} done
+        </p>
+        {!savedLoaded ? (
+          <p className="empty">Loading…</p>
+        ) : saved.length === 0 ? (
+          <p className="empty">No saved tasks yet. Approve extracted tasks to keep them here.</p>
+        ) : (
+          <table data-testid="saved-table">
+            <thead>
+              <tr><th>Done</th><th>Task</th><th>Owner</th><th>Deadline</th><th></th></tr>
+            </thead>
+            <tbody>
+              {saved.map((task) => (
+                <SavedRow key={`${task.id}:${task.owner}`} task={task} busy={busy} onChange={changeSaved} onDelete={removeSaved} />
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
     </main>
+  );
+}
+
+function SavedRow({
+  task,
+  busy,
+  onChange,
+  onDelete,
+}: {
+  task: SavedTask;
+  busy: boolean;
+  onChange: (id: number, changes: TaskChanges) => void;
+  onDelete: (task: SavedTask) => void;
+}) {
+  // Edit the owner locally and save on blur/Enter, not on every keystroke.
+  // The parent keys this row by id+owner, so a saved change resets local state.
+  const [owner, setOwner] = useState(task.owner);
+  const commitOwner = () => {
+    if (owner.trim() && owner !== task.owner) onChange(task.id, { owner });
+    else setOwner(task.owner);
+  };
+
+  return (
+    <tr className={task.completed ? "completed" : undefined}>
+      <td>
+        <input
+          type="checkbox"
+          checked={task.completed}
+          disabled={busy}
+          onChange={() => onChange(task.id, { completed: !task.completed })}
+          aria-label={`Mark "${task.task}" as completed`}
+        />
+      </td>
+      <td className="task">
+        {task.task}
+        {task.kind === "suggestion" && <span className="tag">suggestion</span>}
+      </td>
+      <td>
+        <input
+          className="owner-input"
+          value={owner}
+          onChange={(e) => setOwner(e.target.value)}
+          onBlur={commitOwner}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+          aria-label={`Owner of "${task.task}"`}
+        />
+      </td>
+      <td className="deadline">{task.deadline}</td>
+      <td className="review">
+        <button className="small ghost" onClick={() => onDelete(task)} disabled={busy}
+          aria-label={`Delete "${task.task}"`}>
+          Delete
+        </button>
+      </td>
+    </tr>
   );
 }
