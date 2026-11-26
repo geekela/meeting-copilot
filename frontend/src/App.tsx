@@ -9,6 +9,8 @@ import {
   type SavedTask,
   type TaskChanges,
 } from "./api";
+import RecordControls from "./RecordControls";
+import { appendTranscript } from "./transcript";
 import "./App.css";
 
 const SAMPLE = `Weekly sync - Q4 planning
@@ -19,7 +21,7 @@ Sam mentioned a nice vegan restaurant for the team dinner.
 We discussed the timeline and everyone agreed it looks fine.`;
 
 const NO_DEADLINE = "No deadline";
-const MAX_NOTES = 20_000; // backend limit (AnalyzeRequest.notes)
+const MAX_NOTES = 60_000; // backend limit (AnalyzeRequest.notes)
 // Deadlines are free text. An empty field means (and is stored as) "No deadline".
 const deadlineToInput = (deadline: string) => (deadline === NO_DEADLINE ? "" : deadline);
 const inputToDeadline = (value: string) => value.trim() || NO_DEADLINE;
@@ -180,7 +182,7 @@ export default function App() {
       <main className="container">
         <div className="intro">
           <p className="lead">Turn meeting notes into tasks</p>
-          <p className="subtitle">Paste your notes, review what Copilot pulled out, and keep only the tasks that matter.</p>
+          <p className="subtitle">Record the meeting or paste your notes, review what Copilot pulled out, and keep only the tasks that matter.</p>
         </div>
 
         {error && <div className="error" role="alert">{error}</div>}
@@ -193,6 +195,11 @@ export default function App() {
                 {notes.length.toLocaleString("en-US")} / {MAX_NOTES.toLocaleString("en-US")}
               </span>
             </div>
+            <RecordControls
+              onTranscript={(text) => setNotes((prev) => appendTranscript(prev, text))}
+              onError={setError}
+              disabled={loading}
+            />
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}

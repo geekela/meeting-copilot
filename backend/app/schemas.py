@@ -5,7 +5,14 @@ from pydantic import BaseModel, Field
 
 
 class AnalyzeRequest(BaseModel):
-    notes: str = Field(..., min_length=1, max_length=20_000)
+    notes: str = Field(..., min_length=1, max_length=60_000)
+
+
+class TranscribeResponse(BaseModel):
+    # One line per speaker turn: "Speaker 1: ...".
+    transcript: str
+    # Which transcriber produced it ("mock" or "mistral").
+    transcriber: str
 
 
 class ActionItem(BaseModel):

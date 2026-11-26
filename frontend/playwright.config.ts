@@ -6,8 +6,8 @@ import { join } from "node:path";
 // End-to-end tests start their own backend + frontend on dedicated ports,
 // so they never collide with (or reuse) your normal dev servers on 8001/5174.
 //
-//   npm run test:e2e        -> offline mock analyzer, no API calls, free
-//   npm run test:e2e:live   -> real Claude via backend/.env (paid API calls)
+//   npm run test:e2e        -> offline mock analyzer + transcriber, no API calls, free
+//   npm run test:e2e:live   -> real Claude + Mistral via backend/.env (paid API calls)
 const LIVE = process.env.E2E_LIVE === "1";
 const API_PORT = 8011;
 const WEB_PORT = 5184;
@@ -29,6 +29,8 @@ export default defineConfig({
     baseURL: WEB_URL,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
+    // A fake microphone (a test tone) that is allowed without a permission prompt.
+    launchOptions: { args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] },
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
@@ -39,6 +41,7 @@ export default defineConfig({
       env: {
         // Values set here win over backend/.env (load_dotenv never overrides).
         ANALYZER: LIVE ? "anthropic" : "mock",
+        TRANSCRIBER: LIVE ? "mistral" : "mock",
         CORS_ORIGINS: WEB_URL,
         TASKS_DB,
       },
@@ -47,7 +50,8 @@ export default defineConfig({
       command: `npx vite --port ${WEB_PORT}`,
       url: WEB_URL,
       reuseExistingServer: false,
-      env: { VITE_API_URL: API_URL },
+      // Short recorder chunks so crash-recovery tests don't wait 10s for the first save.
+      env: { VITE_API_URL: API_URL, VITE_RECORDER_CHUNK_MS: "500" },
     },
   ],
 });

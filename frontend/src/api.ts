@@ -23,6 +23,11 @@ export interface SavedTask extends ActionItem {
   created_at: string;
 }
 
+export interface TranscribeResponse {
+  transcript: string; // one line per speaker turn: "Speaker 1: ..."
+  transcriber: string; // "mock" | "mistral"
+}
+
 export type TaskChanges = Partial<Pick<SavedTask, "owner" | "deadline" | "completed">>;
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8001";
@@ -32,7 +37,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(`${API_URL}${path}`, {
       ...init,
-      headers: { "Content-Type": "application/json", ...init?.headers },
+      // JSON bodies are strings; audio uploads set their own Content-Type.
+      headers: typeof init?.body === "string" ? { "Content-Type": "application/json", ...init.headers } : init?.headers,
     });
   } catch {
     throw new Error("Cannot reach the backend. Is it running on port 8001?");
@@ -47,6 +53,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function analyzeNotes(notes: string): Promise<AnalyzeResponse> {
   return request("/api/analyze", { method: "POST", body: JSON.stringify({ notes }) });
+}
+
+/** Sends the recording as the raw request body (kept in memory on the server, never multipart). */
+export function transcribeAudio(audio: Blob): Promise<TranscribeResponse> {
+  return request("/api/transcribe", {
+    method: "POST",
+    body: audio,
+    headers: { "Content-Type": audio.type || "audio/webm" },
+  });
 }
 
 export function listTasks(): Promise<SavedTask[]> {

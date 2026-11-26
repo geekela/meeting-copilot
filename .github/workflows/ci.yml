@@ -13,9 +13,10 @@ concurrency:
 permissions:
   contents: read
 
-# All jobs use the offline mock analyzer: no secrets, no paid API calls.
+# All jobs use the offline mock analyzer and transcriber: no secrets, no paid API calls.
 env:
   ANALYZER: mock
+  TRANSCRIBER: mock
 
 jobs:
   backend:
